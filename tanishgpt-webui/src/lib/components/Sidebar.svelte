@@ -12,10 +12,7 @@
     }
 
     async function createNewSession() {
-        const res = await fetch("http://127.0.0.1:8000/sessions/new", {
-            method: "POST"
-        });
-
+        const res = await fetch("http://127.0.0.1:8000/sessions/new", { method: "POST" });
         const data = await res.json();
 
         // ✅ Set active session ONCE
@@ -36,8 +33,7 @@
 </script>
 
 <aside
-    class="fixed top-0 left-0 h-full w-64 bg-[#121826] text-white shadow-xl z-40
-           transform transition-transform duration-300 md:translate-x-0"
+    class="fixed top-0 left-0 h-full w-64 bg-[#121826] text-white shadow-xl z-40 transform transition-transform duration-300 md:translate-x-0"
     class:translate-x-0={$sidebarOpen}
     class:-translate-x-full={!$sidebarOpen}
 >
@@ -52,16 +48,16 @@
 
     <nav class="space-y-1 px-4 overflow-y-auto max-h-[70vh]">
         {#each sessions as s}
-        <button
-            class="w-full text-left px-3 py-2 rounded hover:bg-[#1e293b] transition-all truncate text-sm
-                   {s.id === $activeSessionId ? 'bg-[#1e293b]' : 'bg-transparent'}"
-            on:click={() => openSession(s.id)}
-        >
-            {s.title}
-            <div class="text-xs opacity-50">
-                {new Date(s.last_active * 1000).toLocaleString()}
-            </div>
-        </button>
+            <button
+                class="w-full text-left px-3 py-2 rounded hover:bg-[#1e293b] transition-all truncate text-sm"
+                class:bg-[#1e293b]={s.id === $activeSessionId}
+                on:click={() => openSession(s.id)}
+            >
+                {s.title}
+                <div class="text-xs opacity-50">
+                    {new Date(s.last_active * 1000).toLocaleString()}
+                </div>
+            </button>
         {/each}
     </nav>
 

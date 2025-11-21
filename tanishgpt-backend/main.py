@@ -1,13 +1,17 @@
 import os
+import uuid
+import shutil
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Optional, List
+
 import requests
 import chromadb
 from chromadb.config import Settings
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from typing import Optional, List
-from datetime import datetime, timezone
 
 from session_store import (
     create_session,
@@ -17,12 +21,21 @@ from session_store import (
     delete_session_metadata
 )
 
+# New Modules
+from document_processor import extract_text_from_pdf, extract_text_from_docx, extract_text_from_txt, chunk_with_metadata
+from graph_rag import GraphBuilder, GraphRetriever
+
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 LLAMA_SERVER = "http://127.0.0.1:8080/v1/chat/completions"
 CHROMA_PATH = "../tanish_memory_db"
+DATA_DIR = Path("./data")
+GRAPH_DIR = Path("./graphs")
 EMBED_MODEL = "all-MiniLM-L6-v2"
+
+DATA_DIR.mkdir(exist_ok=True)
+GRAPH_DIR.mkdir(exist_ok=True)
 
 # -------------------------------------------------
 # FASTAPI SETUP
@@ -44,6 +57,10 @@ client = chromadb.Client(Settings(
 ))
 session_collection = client.get_or_create_collection("session_messages")
 global_memory = client.get_or_create_collection("global_memory")
+# Document collection will be separate or shared? Let's use a shared one for simplicity for now, 
+# or per-user. Since this is single user, we use one "documents" collection.
+doc_collection = client.get_or_create_collection("documents")
+
 embedder = SentenceTransformer(EMBED_MODEL)
 
 # -------------------------------------------------
@@ -99,6 +116,25 @@ def recall_session(session_id: str, query: str, n=5):
     res = session_collection.query(query_texts=[query], n_results=n, where={"session_id": session_id})
     return res.get("documents", [[]])[0]
 
+def recall_documents(query: str, n=3):
+    """Retrieve relevant chunks from uploaded documents."""
+    res = doc_collection.query(query_texts=[query], n_results=n)
+    return res.get("documents", [[]])[0]
+
+def format_memory(mem_list):
+    if not mem_list:
+        return "None."
+    formatted_lines = []
+    for m in mem_list:
+        line = m.strip()
+        if not line:
+            continue
+        if line.lower().startswith("user:") or line.lower().startswith("ai:"):
+            formatted_lines.append(f"- {line}")
+        else:
+            formatted_lines.append(f"- {line}")
+    return "\n".join(formatted_lines)
+
 def call_llama(messages):
     payload = {
         "model": "tanish-local",
@@ -111,12 +147,54 @@ def call_llama(messages):
     return r.json()["choices"][0]["message"]["content"]
 
 # -------------------------------------------------
+# BACKGROUND TASKS
+# -------------------------------------------------
+def process_document_background(file_path: Path, doc_id: str):
+    """Extracts text, chunks it, indexes in Vector DB, and builds Graph."""
+    print(f"Processing {file_path}...")
+    
+    # 1. Extract
+    ext = file_path.suffix.lower()
+    if ext == ".pdf":
+        text = extract_text_from_pdf(file_path)
+    elif ext == ".docx":
+        text = extract_text_from_docx(file_path)
+    else:
+        text = extract_text_from_txt(file_path)
+        
+    # 2. Chunk
+    chunks_data = chunk_with_metadata(text)
+    texts = [c["text"] for c in chunks_data]
+    metadatas = [c["metadata"] for c in chunks_data]
+    
+    # Add doc_id to metadata
+    for m in metadatas:
+        m["doc_id"] = doc_id
+        
+    # 3. Vector Index
+    ids = [f"{doc_id}_{i}" for i in range(len(texts))]
+    doc_collection.add(
+        ids=ids,
+        documents=texts,
+        embeddings=[embed(t) for t in texts],
+        metadatas=metadatas
+    )
+    print(f"Indexed {len(texts)} chunks for {doc_id}")
+
+    # 4. Graph Build
+    graph_path = GRAPH_DIR / "knowledge_graph.json"
+    builder = GraphBuilder(graph_path)
+    builder.build_graph(texts) # This uses LLM, might take time
+    print(f"Graph updated for {doc_id}")
+
+# -------------------------------------------------
 # Pydantic Models
 # -------------------------------------------------
 class ChatReq(BaseModel):
     session_id: Optional[str] = None
     message: str
     top_n: int = 5
+    deep_search: bool = False # New flag
 
 class ChatResp(BaseModel):
     session_id: str
@@ -131,6 +209,18 @@ class SessionInfo(BaseModel):
 # -------------------------------------------------
 # ENDPOINTS
 # -------------------------------------------------
+@app.post("/upload")
+async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    doc_id = str(uuid.uuid4())
+    file_path = DATA_DIR / f"{doc_id}_{file.filename}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    background_tasks.add_task(process_document_background, file_path, doc_id)
+    
+    return {"status": "queued", "doc_id": doc_id, "message": "Document is being processed in background."}
+
 @app.post("/sessions/new", response_model=SessionInfo)
 def new_session():
     return create_session()
@@ -164,7 +254,7 @@ def get_session_messages(session_id: str):
 @app.delete("/sessions/{session_id}")
 def delete_session(session_id: str):
     delete_session_metadata(session_id)
-    res = session_collection.get(where={"session_id": session_id}, include=["ids"])
+    res = session_collection.get(where={"session_id": session_id})
     ids = res.get("ids", [])
     if ids:
         session_collection.delete(ids=ids)
@@ -175,20 +265,59 @@ def chat(req: ChatReq):
     if req.session_id:
         session_id = req.session_id
     else:
-        new_sess = create_session()
+        title = req.message.strip()
+        if len(title) > 50:
+            title = title[:47] + "..."
+        new_sess = create_session(title=title)
         session_id = new_sess["id"]
 
     touch_session(session_id)
 
-    session_memories = recall_session(session_id, req.message, n=req.top_n)
-    session_block = "\n".join(session_memories)
-    global_memories = recall_global(req.message, n=3)
-    global_block = "\n".join(global_memories)
+    # 1. Recall Session & Global Memory
+    session_memories = recall_session(session_id, req.message, n=8)
+    global_memories = recall_global(req.message, n=5)
+    
+    # 2. Recall Documents (Vector Search)
+    doc_memories = recall_documents(req.message, n=5)
+    
+    # 3. Graph Search (Deep Search)
+    graph_context = ""
+    if req.deep_search:
+        graph_path = GRAPH_DIR / "knowledge_graph.json"
+        retriever = GraphRetriever(graph_path)
+        graph_context = retriever.get_relevant_subgraph_text(req.message)
 
-    messages = [{
-        "role": "system",
-        "content": f"Relevant global memory:\n{global_block}\n\nRelevant session memory:\n{session_block}"
-    }, {"role": "user", "content": req.message}]
+    # Format blocks
+    session_block = format_memory(session_memories)
+    global_block = format_memory(global_memories)
+    doc_block = format_memory(doc_memories)
+
+    system_prompt = f"""
+You are TanishGPT, a memory-augmented personal assistant for Tanish Solanki.
+
+You DO have memory of previous facts, preferences, and personal details shared with you.
+You also have access to a Knowledge Base of uploaded documents.
+
+### LONG-TERM (global) MEMORY
+{global_block}
+
+### CONVERSATION (session) MEMORY
+{session_block}
+
+### DOCUMENT KNOWLEDGE BASE
+{doc_block}
+"""
+
+    if req.deep_search and graph_context:
+        system_prompt += f"\n### DEEP SEARCH (GRAPH) CONTEXT\n{graph_context}\n"
+
+    assistant_primer = "Note: Use the memory and knowledge base above when answering. If a fact is present, use it directly."
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "assistant", "content": assistant_primer},
+        {"role": "user", "content": req.message}
+    ]
 
     reply = call_llama(messages)
 

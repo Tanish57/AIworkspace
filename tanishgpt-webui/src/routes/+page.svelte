@@ -62,20 +62,17 @@
         let inputCopy = userInput;
         userInput = "";
 
-        // Show "Thinking..." state if deep search is on
-        if (deepSearch) {
-            messages = [
-                ...messages,
-                { sender: "ai", text: "Thinking... (Deep Search Active 🧠)" },
-            ];
-        }
+        // Show "Thinking..." state
+        const thinkingText = deepSearch
+            ? "Thinking... (Deep Search Active 🧠)"
+            : "Thinking...";
+
+        messages = [...messages, { sender: "ai", text: thinkingText }];
 
         const reply = await sendToLlama(inputCopy, sid, deepSearch);
 
-        if (deepSearch) {
-            // Remove the "Thinking..." message
-            messages.pop();
-        }
+        // Remove the "Thinking..." message
+        messages.pop();
 
         messages = [...messages, { sender: "ai", text: reply }];
 

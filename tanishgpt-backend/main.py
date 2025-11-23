@@ -51,10 +51,7 @@ app.add_middleware(
 # -------------------------------------------------
 # CHROMA COLLECTIONS
 # -------------------------------------------------
-client = chromadb.Client(Settings(
-    persist_directory=CHROMA_PATH,
-    anonymized_telemetry=False
-))
+client = chromadb.PersistentClient(path=CHROMA_PATH)
 session_collection = client.get_or_create_collection("session_messages")
 global_memory = client.get_or_create_collection("global_memory")
 # Document collection will be separate or shared? Let's use a shared one for simplicity for now, 
@@ -117,21 +114,31 @@ def recall_session(session_id: str, query: str, n=5):
     return res.get("documents", [[]])[0]
 
 def recall_documents(query: str, n=3):
-    """Retrieve relevant chunks from uploaded documents."""
+    """Retrieve relevant chunks from uploaded documents with metadata."""
     res = doc_collection.query(query_texts=[query], n_results=n)
-    return res.get("documents", [[]])[0]
+    docs = res.get("documents", [[]])[0]
+    metas = res.get("metadatas", [[]])[0]
+    return list(zip(docs, metas))
 
 def format_memory(mem_list):
     if not mem_list:
         return "None."
     formatted_lines = []
-    for m in mem_list:
-        line = m.strip()
-        if not line:
-            continue
-        if line.lower().startswith("user:") or line.lower().startswith("ai:"):
-            formatted_lines.append(f"- {line}")
-        else:
+    for item in mem_list:
+        # Handle tuple (doc, meta) from recall_documents
+        if isinstance(item, tuple):
+            text, meta = item
+            citation = ""
+            if meta:
+                page = meta.get("page_label", "?")
+                chapter = meta.get("chapter_title", "")
+                citation = f" [Page: {page}, Chapter: {chapter}]"
+            formatted_lines.append(f"-{citation} {text.strip()}")
+        # Handle simple string (session/global memory)
+        elif isinstance(item, str):
+            line = item.strip()
+            if not line:
+                continue
             formatted_lines.append(f"- {line}")
     return "\n".join(formatted_lines)
 
@@ -156,14 +163,14 @@ def process_document_background(file_path: Path, doc_id: str):
     # 1. Extract
     ext = file_path.suffix.lower()
     if ext == ".pdf":
-        text = extract_text_from_pdf(file_path)
+        text, page_map = extract_text_from_pdf(file_path)
     elif ext == ".docx":
-        text = extract_text_from_docx(file_path)
+        text, page_map = extract_text_from_docx(file_path)
     else:
-        text = extract_text_from_txt(file_path)
+        text, page_map = extract_text_from_txt(file_path)
         
     # 2. Chunk
-    chunks_data = chunk_with_metadata(text)
+    chunks_data = chunk_with_metadata(text, page_map)
     texts = [c["text"] for c in chunks_data]
     metadatas = [c["metadata"] for c in chunks_data]
     
@@ -291,6 +298,8 @@ def chat(req: ChatReq):
     session_block = format_memory(session_memories)
     global_block = format_memory(global_memories)
     doc_block = format_memory(doc_memories)
+    
+    print(f"DEBUG: doc_block sent to LLM:\n{doc_block}") # Debug log
 
     system_prompt = f"""
 You are TanishGPT, a memory-augmented personal assistant for Tanish Solanki.
@@ -306,12 +315,17 @@ You also have access to a Knowledge Base of uploaded documents.
 
 ### DOCUMENT KNOWLEDGE BASE
 {doc_block}
+
+INSTRUCTIONS:
+1. When answering based on the "DOCUMENT KNOWLEDGE BASE", you MUST cite the Page Number and Chapter if available.
+2. Format citations as: `[Page: X, Chapter: Y]`.
+3. If the user asks "where is this mentioned", refer to these citations.
 """
 
     if req.deep_search and graph_context:
         system_prompt += f"\n### DEEP SEARCH (GRAPH) CONTEXT\n{graph_context}\n"
 
-    assistant_primer = "Note: Use the memory and knowledge base above when answering. If a fact is present, use it directly."
+    assistant_primer = "Note: Use the memory and knowledge base above when answering. ALWAYS include citations (Page/Chapter) for document-based answers."
 
     messages = [
         {"role": "system", "content": system_prompt},

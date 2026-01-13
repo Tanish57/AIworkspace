@@ -3,18 +3,102 @@
     "id": "session_61f1b8f3",
     "title": "New Chat",
     "created_at": 1762779910,
-    "last_active": 1762779910
+    "last_active": 1763969720
   },
   "session_2863f910": {
     "id": "session_2863f910",
     "title": "New Chat",
     "created_at": 1762779923,
-    "last_active": 1762782448
+    "last_active": 1763970123
   },
   "session_3002c30b": {
     "id": "session_3002c30b",
     "title": "New Chat",
     "created_at": 1762780433,
-    "last_active": 1762780433
+    "last_active": 1763969998
+  },
+  "session_d1b6c87f": {
+    "id": "session_d1b6c87f",
+    "title": "Write a python script called hello_agent.py tha...",
+    "created_at": 1763968532,
+    "last_active": 1763968532
+  },
+  "session_4f93276c": {
+    "id": "session_4f93276c",
+    "title": "Write a python script called hello_agent.py tha...",
+    "created_at": 1763968647,
+    "last_active": 1763968994
+  },
+  "session_3b42a568": {
+    "id": "session_3b42a568",
+    "title": "write a simple python script called prime.py, i...",
+    "created_at": 1763970226,
+    "last_active": 1763970226
+  },
+  "session_d480b4da": {
+    "id": "session_d480b4da",
+    "title": "write a simple python script called prime.py, i...",
+    "created_at": 1763970279,
+    "last_active": 1763970279
+  },
+  "session_6952777c": {
+    "id": "session_6952777c",
+    "title": "write a simple python script called prime.py, i...",
+    "created_at": 1763970377,
+    "last_active": 1763971057
+  },
+  "session_df109221": {
+    "id": "session_df109221",
+    "title": "what is my name?",
+    "created_at": 1765906713,
+    "last_active": 1765906713
+  },
+  "session_13115552": {
+    "id": "session_13115552",
+    "title": "hi",
+    "created_at": 1765906742,
+    "last_active": 1765906742
+  },
+  "session_d36b5803": {
+    "id": "session_d36b5803",
+    "title": "hello",
+    "created_at": 1765906924,
+    "last_active": 1765908035
+  },
+  "session_59eb8823": {
+    "id": "session_59eb8823",
+    "title": "what is this document about?",
+    "created_at": 1765950827,
+    "last_active": 1765950871
+  },
+  "session_7ef2e085": {
+    "id": "session_7ef2e085",
+    "title": "what is Non-EU taught full letter of offer about?",
+    "created_at": 1765950923,
+    "last_active": 1765951034
+  },
+  "session_a54ff0dc": {
+    "id": "session_a54ff0dc",
+    "title": "New Chat",
+    "created_at": 1765951149,
+    "last_active": 1765951152
+  },
+  "session_7b731309": {
+    "id": "session_7b731309",
+    "title": "What exception is raised when PDF extraction fa...",
+    "created_at": 1766038425,
+    "last_active": 1766038807
+  },
+  "session_7f37f29e": {
+    "id": "session_7f37f29e",
+    "title": "what exception is raised when PDF extraction fa...",
+    "created_at": 1766038825,
+    "last_active": 1766039101
+  },
+  "session_2e7fbe95": {
+    "id": "session_2e7fbe95",
+    "title": "what's the latest news on AI?",
+    "created_at": 1768233603,
+    "last_active": 1768233978
   }
 }

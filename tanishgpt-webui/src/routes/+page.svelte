@@ -4,7 +4,15 @@
     import { sendToLlama } from "$lib/services/chat";
     import { uploadDocument } from "$lib/services/documents";
 
-    let messages: { sender: "user" | "ai"; text: string; ts?: string }[] = [];
+    // Augmented Message Type
+    interface Message {
+        sender: "user" | "ai";
+        text: string;
+        ts?: string;
+        audio?: string; // base64 audio
+    }
+
+    let messages: Message[] = [];
     let userInput = "";
     let loadingHistory = false;
     let started = false;
@@ -15,6 +23,9 @@
     let isUploading = false;
     let uploadStatus = "";
     let fileInput: HTMLInputElement;
+    let isMuted = false;
+    let currentAudio: HTMLAudioElement | null = null;
+    let isPlayingAudioId: number | null = null; // Track which message is playing
 
     // ✅ Load history ONLY when session ID changes
     $: if ($activeSessionId && $activeSessionId !== prevSessionId) {
@@ -36,6 +47,7 @@
             sender: m.role === "user" ? "user" : "ai",
             text: m.content,
             ts: m.ts,
+            // Note: History API doesn't return audio currently, but if it did, we'd map it here.
         }));
 
         loadingHistory = false;
@@ -69,15 +81,67 @@
 
         messages = [...messages, { sender: "ai", text: thinkingText }];
 
-        const reply = await sendToLlama(inputCopy, sid, deepSearch);
+        const { reply, audio } = await sendToLlama(inputCopy, sid, deepSearch);
 
         // Remove the "Thinking..." message
         messages.pop();
 
-        messages = [...messages, { sender: "ai", text: reply }];
+        // Add proper AI message with audio
+        const newMsg: Message = { sender: "ai", text: reply, audio: audio };
+        messages = [...messages, newMsg];
+
+        // Attempt Auto-Play if not muted
+        if (audio && !isMuted) {
+            playAudio(audio, messages.length - 1);
+        }
 
         await tick();
         scrollToBottom();
+    }
+
+    function playAudio(base64Audio: string, msgIndex: number) {
+        console.log("Attempting to play audio, length:", base64Audio.length);
+
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+            isPlayingAudioId = null;
+        }
+
+        try {
+            const audioSrc = `data:audio/wav;base64,${base64Audio}`;
+            currentAudio = new Audio(audioSrc);
+
+            // Ended event to reset icon
+            currentAudio.onended = () => {
+                isPlayingAudioId = null;
+            };
+
+            // Error handling
+            currentAudio.onerror = (e) => {
+                console.error("Audio error", e);
+                isPlayingAudioId = null;
+            };
+
+            const playPromise = currentAudio.play();
+            if (playPromise !== undefined) {
+                playPromise
+                    .then(() => {
+                        isPlayingAudioId = msgIndex;
+                    })
+                    .catch((e) => {
+                        console.error(
+                            "Audio playback error (Autoplay blocked?):",
+                            e,
+                        );
+                        isPlayingAudioId = null;
+                        // Since we have a button in the UI now, user can click it manually.
+                    });
+            }
+        } catch (e) {
+            console.error("Error creating Audio object:", e);
+            isPlayingAudioId = null;
+        }
     }
 
     async function handleFileUpload(e: Event) {
@@ -194,6 +258,13 @@
                 >
                     Upload
                 </button>
+                <button
+                    class="text-sm bg-gray-700 px-3 py-1 rounded hover:bg-gray-600 min-w-[32px]"
+                    on:click={() => (isMuted = !isMuted)}
+                    title={isMuted ? "Unmute" : "Mute"}
+                >
+                    {isMuted ? "🔇" : "🔊"}
+                </button>
             </div>
         </div>
 
@@ -201,19 +272,40 @@
             id="chat-scroll"
             class="flex-1 space-y-4 overflow-y-auto p-2 pb-28"
         >
-            {#each messages as msg}
+            {#each messages as msg, i}
                 <div class="w-full">
                     <div
-                        class={`p-3 rounded-lg max-w-xl ${
+                        class={`p-3 rounded-lg max-w-xl flex flex-col gap-2 ${
                             msg.sender === "user"
                                 ? "bg-blue-600 text-white ml-auto"
                                 : "bg-gray-200 dark:bg-gray-800 text-black dark:text-white mr-auto"
                         }`}
                     >
                         <!-- Render markdown-like bold -->
-                        {@html msg.text
-                            .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
-                            .replace(/\n/g, "<br>")}
+                        <div>
+                            {@html msg.text
+                                .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+                                .replace(/\n/g, "<br>")}
+                        </div>
+
+                        <!-- Audio Play Button (Only for AI messages with audio) -->
+                        {#if msg.audio}
+                            <div
+                                class="mt-1 pt-2 border-t border-gray-300 dark:border-gray-700"
+                            >
+                                <button
+                                    class="flex items-center gap-2 text-xs bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 px-2 py-1 rounded transition-colors"
+                                    on:click={() =>
+                                        playAudio(msg.audio || "", i)}
+                                >
+                                    {#if isPlayingAudioId === i}
+                                        <span>⏹️ Stop</span>
+                                    {:else}
+                                        <span>▶️ Play Audio</span>
+                                    {/if}
+                                </button>
+                            </div>
+                        {/if}
                     </div>
                 </div>
             {/each}
